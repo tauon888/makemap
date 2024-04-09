@@ -9,12 +9,15 @@ The is needed as:
 
 ## Usage:
 ```
-$ python makemap.py [-v] filename
+$ python makemap.py [-d] filename
 ```
 
 ## Example:
 ```
-$ python makemap.py SolveItSmarter.html
+$ python makemap.py MyMap.html
+FreeMind MakeMap Utility V1.0, processing MyMap.html...
+FMID_1097832583FM => https://toydip.com/collections/meccano
+<area shape="rect" href="https://toydip.com/collections/meccano" alt="" title="" coords="684,436,862,490" />
 ```
 
 ### Notes
