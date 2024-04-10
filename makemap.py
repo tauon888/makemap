@@ -8,133 +8,180 @@
 #
 #   Created:  06/04/24 - Initial version.
 #  Modified:  10/04/24 - Only write map links that resolve to remote sites.
+#  Modified:  10/04/24 - Add main and helper functions and remove the need
+#                        for an intermediate temp file.
 # Copyright:  (c) Mike 2024
 #-------------------------------------------------------------------------------
 import argparse
 
 # Variables.
-version = 'V1.0'
+version = 'V1.1'
 
-# Parse the input file.
-# Check for any command line args.
-parser = argparse.ArgumentParser(description='This program reads an exported FreeMind HTML image map and resolves and removes the unnecessary reference table.')
-parser.add_argument('filename', help='input file, the exported HTML image map, for example MyMap.html')
-parser.add_argument('-d', '--debug', help='print some debugging output', action='store_true')
-args = parser.parse_args()
-debug = args.debug
-filename = args.filename
-print(filename)
 
-root = filename[0:filename.find('.')]
-if debug:
-    print(root)
-inp_file = root + '.html'
-tmp_file = root + '-temp.html'
-out_file = root + '-reduced.html'
+def read_file_into_memory(file):
+    print(f'Reading {file}...')
+    with open(file, 'r') as reader:
+        content = reader.readlines()
+    return content
 
-# Now run.
-print(f'FreeMind MakeMap Utility {version}, processing {filename}...')
 
-# Read the input file into memory, putting all map anchors into a hashmap.
-with open(inp_file, 'r') as reader:
-    lines = reader.readlines()
+def reformat_input(content):
+    banned_tags = ['<link ', '<meta ', '<!--Th']
+    # Build a list of reformatted content, with line breaks.
+    reformatted_content = []
+    appending = True
+    for line in content:
+        ln = line.strip()
 
-# Open a temporary output file.
-tmp = open(tmp_file, 'w')
+        # Add in some linefeeds for easier parsing and debugging.
+        ln = ln.replace("<head>", "\n<head>\n")
+        ln = ln.replace("</head>", "\n</head>\n")
+        ln = ln.replace("</script>", "\n</script>\n")
+        ln = ln.replace("</title>", "</title>\n")
+        ln = ln.replace("<body>", "<body>\n")
+        ln = ln.replace("</h1>", "</h1>\n")
+        ln = ln.replace("</div>", "</div>\n")
+        ln = ln.replace("</map>", "</map>\n")
+        ln = ln.replace(" />", " />\n")
 
-# Now read whole map and replace the local hrefs with remote ones.
-for line in lines:
-    ln = line.strip()
+        # Special processing to left align image map.
+        ln = ln.replace("text-align:center;", "text-align:left;")
+        ln = ln.replace(".html_files//image.png", ".html_files/image.png")
 
-    # Add in some linefeeds for easier parsing and debugging.
-    ln = ln.replace("</head>", "\n<head>\n")
-    ln = ln.replace("<body>", "<body>\n")
-    ln = ln.replace("</h1>", "</h1>\n")
-    ln = ln.replace("</div>", "</div>\n")
-    ln = ln.replace("</map>", "</map>\n")
-    ln = ln.replace(" />", " />\n")
 
-    if debug:
-        print(ln)
-    tmp.write(ln)
-
-# Close the temporary file.
-tmp.close()
-
-# Now open the temp file to build a hashmap of links.
-with open(tmp_file, 'r') as reader:
-    lines = reader.readlines()
-
-# Process the temp file, to build a map of links.
-inlink = False
-link_map = {}
-for line in lines:
-    ln = line.strip()
-
-    # if line begins with <a id=...> then look for the remote link.
-    if ln.startswith('<a id='):
-        if debug:
-            print(ln)
-        k = ln[7:]
-        eidx = k.find('FM\"')
-        k = k[0:eidx+2]
-        if debug:
-            print(k)
-        inlink = True
-    if inlink:
-        if 'href=' in ln:
-            v = ln
-            inlink = False
-
-            # Extract the link e.g. <a href="https://www.meccanospares.com/">Meccano Spares</a>
-            sidx = v.find('<a href=')
-            lnk = v[sidx+9:]
-            eidx = lnk.find('\">')
-            lnk = lnk[0:eidx]
-
-            # Put the remote link address in the map.
-            link_map[k] = lnk
-
-# Check the map.
-for k,v in link_map.items():
-    print(f'{k} => {v}')
-
-# Process the temp file again, to write the reduced output.
-out = open(out_file, 'w')
-
-for line in lines:
-    ln = line.strip()
-    if debug:
-        print(ln)
-
-    # Only output an href if it points to a remote site.
-    write_link = True;
-    if '#FMID_' in ln:
-        sidx = ln.find('FMID_')
-        eidx = ln.find('FM\"')
-        k = ln[sidx:eidx+2]
-        # Resolve the local anchor to a remote link.
-        if k in link_map.keys():
-            v = link_map[k]
+        formatted = ln.split('\n')
+        pruned = [x for x in formatted if x]
+        for p in pruned:
             if debug:
-                print(f'{k} anchor in dictionary, replacing with {v}')
-            ln = ln.replace("#" + k, v)
+                print(f'PRN: [{p}]')
+
+            if p.startswith('<script'):
+                appending = False
+
+            if appending == True:
+                # Filter out unwanted HTML.
+                if p[0:6] not in banned_tags:
+                    reformatted_content.append(p)
+
+            if p.startswith('</script>'):
+                appending = True
+
+    return reformatted_content
+
+
+def build_anchor_map_of_links(content):
+    inlink = False
+    anchor_map = {}
+    for line in content:
+        ln = line.strip()
+
+        # if line begins with <a id=...> then look for the remote link.
+        if ln.startswith('<a id='):
+            if debug:
+                print(ln)
+            k = ln[7:]
+            eidx = k.find('FM\"')
+            k = k[0:eidx+2]
+            if debug:
+                print(k)
+            inlink = True
+
+        if inlink:
+            if 'href=' in ln:
+                v = ln
+                inlink = False
+
+                # Extract the link e.g. <a href="https://www.meccanospares.com/">Meccano Spares</a>
+                sidx = v.find('<a href=')
+                lnk = v[sidx+9:]
+                eidx = lnk.find('\">')
+                lnk = lnk[0:eidx]
+
+                # Put the remote link address in the map.
+                anchor_map[k] = lnk
+
+    # Check the map.
+    for k,v in anchor_map.items():
+        print(f'{k} => {v}')
+
+    return anchor_map
+
+
+def write_reduced_content(file, content, anchor_map):
+    print(f'Writing {file}...')
+    out = open(file, 'w')
+
+    for line in content:
+        ln = line.strip()
+        if debug:
             print(ln)
-        else:
-            if 'fm_imagemap' not in ln:
-                write_link = False
 
-    if write_link:
-        out.write(ln + '\n')
+        # Only output an href if it points to a remote site.
+        write_link = True;
+        if '#FMID_' in ln:
+            sidx = ln.find('FMID_')
+            eidx = ln.find('FM\"')
+            k = ln[sidx:eidx+2]
+            # Resolve the local anchor to a remote link.
+            if k in anchor_map.keys():
+                v = anchor_map[k]
+                if debug:
+                    print(f'{k} anchor in dictionary, replacing with {v}')
+                ln = ln.replace("#" + k, v)
+                print(ln)
+            else:
+                if 'fm_imagemap' not in ln:
+                    write_link = False
 
-    # Stop processing at the end of the map.
-    if ln.endswith('</map>'):
-        out.write('<div id=\"footer\">\n')
-        out.write('&copy; Mike Smith - 2024 Melbourne, Australia <a href="https://www.solveitsmarter.com">solveitsmarter.com</a>\n')
-        out.write('</div>\n')
-        out.write('</body>\n')
-        out.write('</html>\n')
-        break
+        if write_link:
+            out.write(ln + '\n')
 
-# Close the output file.
-out.close()
+        # Stop processing at the end of the map.
+        if ln.endswith('</map>'):
+            out.write('<div id=\"footer\">\n')
+            out.write('&copy; Mike Smith - 2024 Melbourne, Australia <a href="https://www.solveitsmarter.com">solveitsmarter.com</a>\n')
+            out.write('</div>\n')
+            out.write('</body>\n')
+            out.write('</html>\n')
+            break
+
+    # Close the output file.
+    out.close()
+    print(f'Done')
+
+
+
+def main():
+    global debug
+
+    print(f'FreeMind MakeMap Utility {version}...')
+
+    # Parse the command line for input file and optional args.
+    parser = argparse.ArgumentParser(description='This program reads an exported FreeMind HTML image map and resolves and removes the unnecessary reference table.')
+    parser.add_argument('filename', help='input file, the exported HTML image map, for example MyMap.html')
+    parser.add_argument('-d', '--debug', help='print some debugging output', action='store_true')
+    args = parser.parse_args()
+    debug = args.debug
+    inp_file = args.filename
+
+    # Work out the various filenames, based on the root of the input file.
+    root = inp_file[0:inp_file.find('.')]
+    if debug:
+        print(root)
+    out_file = root + '-reduced.html'
+
+    # Process the input file.
+    content = read_file_into_memory(inp_file)
+
+    # Reformat the input.
+    reformatted_content = reformat_input(content)
+
+    # Process the reformatted content to build a map of links.
+    anchor_map = build_anchor_map_of_links(reformatted_content)
+
+    # Process the reformatted content, writing only links to remote websites.
+    write_reduced_content(out_file, reformatted_content, anchor_map)
+
+
+if __name__ == '__main__':
+    main()
